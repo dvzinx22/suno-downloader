@@ -1,24 +1,33 @@
-# 🎵 Suno AI Downloader & Scraper
+# 🎵 Suno AI Downloader & Sample Extractor HQ
 
-Herramienta para descargar canciones compartidas de **Suno.com** mediante inspección de metadatos, scraping y extracción directa desde la CDN.
+Herramienta para descargar y descifrar canciones compartidas de **Suno.com** en MP3 estándar a 320 kbps de alta fidelidad, con portada, letras y **generador/descargador de muestras de audio (previews/clips)**.
 
 ---
 
 ## 🚀 Formas de Uso
 
-### 1. Con Doble Clic (Recomendado)
-Haz doble clic en el archivo:
-👉 `iniciar_suno_downloader.bat`
+### 1. Desde tu Celular / Navegador Web (Recomendado para Móviles)
+Haz doble clic en:
+👉 `iniciar_para_celular.bat`
 
-Se abrirá la **Interfaz Gráfica (GUI)** donde podrás:
-- Pegar el enlace compartido con el botón **📋 Pegar Enlace**.
-- Ver la miniatura de la portada, el título, etiquetas de estilo y la letra/prompt.
-- Elegir si quieres guardar la portada `.png`, el video `.mp4` y la letra `.txt`.
-- Cambiar la carpeta de descarga o abrirla directamente con **📂 Abrir Carpeta**.
+- Abre la dirección IP mostrada o escanea el código QR con tu celular.
+- Descarga la canción completa directamente a tu teléfono.
+- **✂️ Apartado de Muestras (Previews)**: Extrae un clip de 30s, 1 min, 2 min o proporcional a la duración total con suavizado automático (fade-in / fade-out) y escúchalo o descárgalo en tu celular.
 
 ---
 
-### 2. Desde la Terminal / Consola
+### 2. Con la Interfaz de Escritorio (GUI)
+Haz doble clic en:
+👉 `iniciar_suno_downloader.bat`
+
+- Pega el enlace de Suno con el botón **📋 Pegar Enlace**.
+- Visualiza la carátula, título, tags de estilo, letra/prompt y duración exacta.
+- Descarga la canción completa en MP3 320 kbps.
+- **✂️ Sección de Muestras**: Selecciona la duración deseada (30s, 1m, 2m, mitad o automática) y pulsa **✂️ Guardar Muestra MP3** para crear el clip al instante y reproducirlo.
+
+---
+
+### 3. Desde la Terminal / Consola
 
 #### Abrir la interfaz gráfica:
 ```bash
@@ -30,9 +39,9 @@ python suno_downloader.py --gui
 python suno_downloader.py https://suno.com/song/c7e0c4ce-4d51-4d3b-9e47-e170c0c7a10a
 ```
 
-#### Descargar también video MP4 y guardar en otra carpeta:
+#### Descargar canción y generar muestra automáticamente (ej. 2 minutos o auto):
 ```bash
-python suno_downloader.py https://suno.com/song/c7e0c4ce-4d51-4d3b-9e47-e170c0c7a10a --video -o "mis_canciones"
+python suno_downloader.py https://suno.com/song/c7e0c4ce-4d51-4d3b-9e47-e170c0c7a10a --sample 120
 ```
 
 ---
@@ -46,8 +55,9 @@ python suno_downloader.py https://suno.com/song/c7e0c4ce-4d51-4d3b-9e47-e170c0c7
 
 ---
 
-## ⚙️ ¿Cómo Funciona?
+## ⚙️ ¿Cómo Funciona el Generador de Muestras?
 
-1. **Resolución y Redirecciones**: Detecta el UUID del clip musical siguiendo redirecciones HTTP con headers reales de navegador.
-2. **Inspección de Metadatos**: Extrae título, etiquetas de estilo, letra del prompt y portada desde las etiquetas OpenGraph y el estado de Next.js (`__NEXT_DATA__`).
-3. **Extracción Directa de Audio**: Localiza la URL de transmisión directa en la CDN de Suno (`cdn1.suno.ai` / `cdn2.suno.ai` / `audiopipe`) y descarga el MP3 en alta calidad.
+1. **Detección de Duración**: Analiza los segundos exactos de la pista MP3 mediante FFmpeg.
+2. **Cálculo Proporcional**: Si la canción dura ~5 minutos, genera una muestra sugerida de 2 minutos (o la duración que elijas).
+3. **Corte y Suavizado HQ**: Aplica filtros de Fade-In y Fade-Out para evitar cortes abruptos y exporta un archivo MP3 independiente a 320 kbps listo para reproducir y compartir.
+

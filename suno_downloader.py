@@ -241,6 +241,107 @@ class SunoScraper:
 
         return output_mp3_path
 
+    def get_audio_duration(self, file_path: str) -> float:
+        """Obtiene la duración del archivo de audio en segundos mediante FFmpeg."""
+        if not os.path.exists(file_path):
+            return 0.0
+        try:
+            cmd = [self.ffmpeg_exe, "-i", file_path]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", res.stderr)
+            if match:
+                h, m, s = match.groups()
+                return int(h) * 3600 + int(m) * 60 + float(s)
+        except Exception:
+            pass
+        return 0.0
+
+    def create_audio_sample(
+        self,
+        input_mp3: str,
+        output_sample_mp3: Optional[str] = None,
+        start_sec: float = 0.0,
+        duration_sec: Optional[float] = None,
+        apply_fade: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Genera una muestra/preview en MP3 de una parte de la canción.
+        Si no se especifica duration_sec, se calcula automáticamente según la duración total:
+          - Si dura <= 60s: muestra de 30s.
+          - Si dura <= 180s (3m): muestra de 60s (1m).
+          - Si dura > 180s (ej. 4-5m): muestra de 120s (2m) o 45% del total.
+        """
+        if not os.path.exists(input_mp3):
+            raise FileNotFoundError(f"El archivo de audio no existe: {input_mp3}")
+
+        total_duration = self.get_audio_duration(input_mp3)
+
+        # Cálculo inteligente de duración de muestra
+        if duration_sec is None or duration_sec <= 0:
+            if total_duration <= 0:
+                duration_sec = 60.0
+            elif total_duration <= 60:
+                duration_sec = min(30.0, total_duration)
+            elif total_duration <= 180:
+                duration_sec = 60.0
+            else:
+                # Ejemplo: canciones de 4-5 minutos -> muestra de 2 minutos (120s)
+                duration_sec = min(120.0, total_duration * 0.45)
+
+        # Asegurar límites válidos
+        if total_duration > 0:
+            start_sec = max(0.0, min(start_sec, max(0.0, total_duration - 5.0)))
+            duration_sec = min(duration_sec, total_duration - start_sec)
+        else:
+            start_sec = max(0.0, start_sec)
+            duration_sec = max(5.0, duration_sec)
+
+        if not output_sample_mp3:
+            base, ext = os.path.splitext(input_mp3)
+            dur_label = f"{int(duration_sec)}s" if duration_sec < 60 else f"{int(duration_sec // 60)}m{int(duration_sec % 60):02d}s" if duration_sec % 60 else f"{int(duration_sec // 60)}m"
+            output_sample_mp3 = f"{base}_muestra_{dur_label}{ext}"
+
+        # Aplicar suavizado (fade-in y fade-out)
+        filters = []
+        if apply_fade and duration_sec >= 4.0:
+            fade_in_len = min(1.5, duration_sec * 0.08)
+            fade_out_len = min(2.5, duration_sec * 0.12)
+            fade_out_start = max(0.1, duration_sec - fade_out_len)
+            filters.append(f"afade=t=in:ss=0:d={fade_in_len:.2f}")
+            filters.append(f"afade=t=out:st={fade_out_start:.2f}:d={fade_out_len:.2f}")
+
+        cmd = [
+            self.ffmpeg_exe,
+            "-y",
+            "-ss", str(round(start_sec, 2)),
+            "-t", str(round(duration_sec, 2)),
+            "-i", input_mp3
+        ]
+
+        if filters:
+            cmd.extend(["-af", ",".join(filters)])
+
+        cmd.extend([
+            "-c:a", "libmp3lame",
+            "-b:a", "320k",
+            output_sample_mp3
+        ])
+
+        conv_res = subprocess.run(cmd, capture_output=True, text=True)
+        if conv_res.returncode != 0:
+            raise Exception(f"Error al generar la muestra con FFmpeg: {conv_res.stderr}")
+
+        sample_duration = self.get_audio_duration(output_sample_mp3)
+
+        return {
+            "sample_path": output_sample_mp3,
+            "filename": os.path.basename(output_sample_mp3),
+            "total_duration": total_duration,
+            "start_sec": start_sec,
+            "duration_sec": duration_sec,
+            "actual_sample_duration": sample_duration
+        }
+
     def download_cover(self, url: str, destination_path: str):
         """Descarga la portada."""
         try:
@@ -273,7 +374,8 @@ class SunoScraper:
             "info": info,
             "mp3_path": None,
             "cover_path": None,
-            "metadata_path": None
+            "metadata_path": None,
+            "duration": 0.0
         }
 
         # Descifrar y Guardar MP3
@@ -287,6 +389,7 @@ class SunoScraper:
             progress_callback
         )
         result["mp3_path"] = final_audio_path
+        result["duration"] = self.get_audio_duration(final_audio_path)
 
         # Guardar Portada
         if save_cover and info.get("image_url"):
@@ -303,6 +406,9 @@ class SunoScraper:
                 f.write(f"ID Suno: {info['id']}\n")
                 f.write(f"Enlace Original: {info['source_url']}\n")
                 f.write(f"Tags / Estilo: {info['tags']}\n")
+                dur_m = int(result["duration"] // 60)
+                dur_s = int(result["duration"] % 60)
+                f.write(f"Duración: {dur_m}:{dur_s:02d} ({result['duration']:.1f}s)\n")
                 f.write("-" * 50 + "\n")
                 f.write("LETRA / PROMPT:\n")
                 f.write(f"{info['prompt'] or 'No disponible'}\n")
@@ -317,6 +423,7 @@ def launch_cli():
     parser.add_argument("url", nargs="?", help="URL o ID de la canción de Suno")
     parser.add_argument("-o", "--output", default="downloads", help="Carpeta de destino")
     parser.add_argument("--no-cover", action="store_true", help="No descargar portada")
+    parser.add_argument("--sample", nargs="?", const="auto", default=None, help="Generar muestra de audio (ej: 30, 60, 120 o auto)")
     parser.add_argument("--gui", action="store_true", help="Abrir interfaz gráfica")
 
     args = parser.parse_args()
@@ -326,7 +433,7 @@ def launch_cli():
         return
 
     if not args.url:
-        print("Uso: python suno_downloader.py https://suno.com/song/ID_DE_LA_CANCION")
+        print("Uso: python suno_downloader.py https://suno.com/song/ID_DE_LA_CANCION [--sample 120]")
         return
 
     print(f"\n🎵 Conectando y descifrando canción de Suno: {args.url}")
@@ -349,11 +456,25 @@ def launch_cli():
         )
         print("\n\n✅ ¡Descarga y descifrado completados con éxito!")
         print(f"🎵 Título: {res['info']['title']}")
+        dur_m = int(res['duration'] // 60)
+        dur_s = int(res['duration'] % 60)
+        print(f"⏱️ Duración total: {dur_m}:{dur_s:02d} ({res['duration']:.1f}s)")
         print(f"🎧 Archivo MP3 (320 kbps): {res['mp3_path']}")
         if res.get('cover_path'):
             print(f"🖼️ Portada: {res['cover_path']}")
         if res.get('metadata_path'):
             print(f"📄 Letra y Metadatos: {res['metadata_path']}")
+
+        # Si se solicitó muestra por comando
+        if args.sample:
+            dur_req = None
+            if args.sample != "auto":
+                try:
+                    dur_req = float(args.sample)
+                except ValueError:
+                    dur_req = None
+            sample_res = scraper.create_audio_sample(res["mp3_path"], duration_sec=dur_req)
+            print(f"✂️ Muestra generada ({sample_res['actual_sample_duration']:.1f}s): {sample_res['sample_path']}")
 
     except Exception as e:
         print(f"\n❌ Error durante la descarga: {e}")
@@ -368,16 +489,19 @@ def launch_gui():
 
     root = tk.Tk()
     root.title("Suno AI Song Downloader & Decryptor HQ")
-    root.geometry("680x620")
-    root.minsize(620, 560)
+    root.geometry("700x720")
+    root.minsize(640, 660)
     root.configure(bg="#121214")
 
     style = ttk.Style()
     style.theme_use("clam")
     style.configure("TProgressbar", thickness=10, troughcolor="#202024", background="#7928CA")
+    style.configure("TCombobox", fieldbackground="#202024", background="#29292E", foreground="#FFFFFF")
 
     scraper = SunoScraper()
     last_audio_file = [None]
+    last_sample_file = [None]
+    current_duration = [0.0]
 
     # Header
     header_frame = tk.Frame(root, bg="#1a1a1e", height=70)
@@ -395,7 +519,7 @@ def launch_gui():
 
     lbl_sub = tk.Label(
         header_frame,
-        text="MP3 Decryptor 320 kbps HQ",
+        text="MP3 Decryptor 320 kbps HQ + Extractor de Muestras",
         font=("Segoe UI", 10, "italic"),
         fg="#888899",
         bg="#1a1a1e"
@@ -404,7 +528,7 @@ def launch_gui():
 
     # Main Container
     main_frame = tk.Frame(root, bg="#121214")
-    main_frame.pack(fill="both", expand=True, padx=20, pady=15)
+    main_frame.pack(fill="both", expand=True, padx=20, pady=12)
 
     # URL Input Section
     lbl_url = tk.Label(
@@ -414,10 +538,10 @@ def launch_gui():
         fg="#E1E1E6",
         bg="#121214"
     )
-    lbl_url.pack(anchor="w", pady=(0, 5))
+    lbl_url.pack(anchor="w", pady=(0, 4))
 
     url_entry_frame = tk.Frame(main_frame, bg="#202024", bd=1, relief="flat")
-    url_entry_frame.pack(fill="x", pady=(0, 12))
+    url_entry_frame.pack(fill="x", pady=(0, 10))
 
     url_entry = tk.Entry(
         url_entry_frame,
@@ -431,7 +555,7 @@ def launch_gui():
 
     # Options Frame
     opts_frame = tk.Frame(main_frame, bg="#121214")
-    opts_frame.pack(fill="x", pady=(0, 10))
+    opts_frame.pack(fill="x", pady=(0, 8))
 
     var_cover = tk.BooleanVar(value=True)
     var_meta = tk.BooleanVar(value=True)
@@ -452,7 +576,7 @@ def launch_gui():
 
     # Folder Selector Frame
     folder_frame = tk.Frame(main_frame, bg="#121214")
-    folder_frame.pack(fill="x", pady=(0, 12))
+    folder_frame.pack(fill="x", pady=(0, 10))
 
     lbl_folder_text = tk.Label(
         folder_frame, text="Carpeta de destino:",
@@ -483,24 +607,24 @@ def launch_gui():
 
     # Progress Section
     progress_bar = ttk.Progressbar(main_frame, style="TProgressbar", mode="determinate")
-    progress_bar.pack(fill="x", pady=(0, 5))
+    progress_bar.pack(fill="x", pady=(0, 4))
 
     status_var = tk.StringVar(value="Listo. Pega un enlace de Suno y presiona 'Descargar Canción'.")
     lbl_status = tk.Label(
         main_frame, textvariable=status_var,
         font=("Segoe UI", 9), fg="#A8A8B3", bg="#121214"
     )
-    lbl_status.pack(anchor="w", pady=(0, 10))
+    lbl_status.pack(anchor="w", pady=(0, 8))
 
     # Song Info Preview Box
     info_card = tk.Frame(main_frame, bg="#1a1a1e", bd=1, relief="flat")
-    info_card.pack(fill="both", expand=True, pady=(0, 12))
+    info_card.pack(fill="both", expand=True, pady=(0, 10))
 
     cover_label = tk.Label(info_card, bg="#202024", width=14, height=7, text="[Portada]", fg="#666677")
-    cover_label.pack(side="left", padx=12, pady=12)
+    cover_label.pack(side="left", padx=12, pady=10)
 
     details_frame = tk.Frame(info_card, bg="#1a1a1e")
-    details_frame.pack(side="left", fill="both", expand=True, padx=(0, 12), pady=12)
+    details_frame.pack(side="left", fill="both", expand=True, padx=(0, 12), pady=10)
 
     lbl_song_title = tk.Label(
         details_frame, text="Título: --",
@@ -508,31 +632,147 @@ def launch_gui():
     )
     lbl_song_title.pack(fill="x")
 
-    lbl_song_tags = tk.Label(
-        details_frame, text="Estilo: --",
+    lbl_song_meta = tk.Label(
+        details_frame, text="Estilo: -- | Duración: --",
         font=("Segoe UI", 9), fg="#FF0080", bg="#1a1a1e", anchor="w"
     )
-    lbl_song_tags.pack(fill="x", pady=(2, 4))
+    lbl_song_meta.pack(fill="x", pady=(2, 4))
 
     txt_lyrics = tk.Text(
-        details_frame, height=5, font=("Consolas", 8),
+        details_frame, height=4, font=("Consolas", 8),
         bg="#121214", fg="#CCCCCC", relief="flat", bd=0
     )
     txt_lyrics.pack(fill="both", expand=True)
     txt_lyrics.insert("1.0", "Letra / Prompt aparecerá aquí...")
     txt_lyrics.config(state="disabled")
 
+    # Sample Controls Frame (Muestras de Audio)
+    sample_box = tk.LabelFrame(
+        main_frame,
+        text=" ✂️ DESCARGAR MUESTRA DE AUDIO (PREVIEW) ",
+        font=("Segoe UI", 9, "bold"),
+        fg="#00DFD8",
+        bg="#18181c",
+        bd=1,
+        relief="groove"
+    )
+    sample_box.pack(fill="x", pady=(0, 10), padx=2, ipady=4)
+
+    sample_inner = tk.Frame(sample_box, bg="#18181c")
+    sample_inner.pack(fill="x", padx=10, pady=4)
+
+    lbl_sample_opt = tk.Label(
+        sample_inner,
+        text="Duración de la muestra:",
+        font=("Segoe UI", 9),
+        fg="#E1E1E6",
+        bg="#18181c"
+    )
+    lbl_sample_opt.pack(side="left", padx=(0, 8))
+
+    sample_options = [
+        "⚡ 30 Segundos",
+        "⏱️ 1 Minuto (60s)",
+        "⏳ 2 Minutos (120s)",
+        "🌓 Mitad de Canción (50%)",
+        "✨ Auto (Recomendada)"
+    ]
+    sample_choice_var = tk.StringVar(value="✨ Auto (Recomendada)")
+    sample_combo = ttk.Combobox(
+        sample_inner,
+        textvariable=sample_choice_var,
+        values=sample_options,
+        state="readonly",
+        width=24
+    )
+    sample_combo.pack(side="left", padx=(0, 10))
+
+    def generate_sample_action():
+        if not last_audio_file[0] or not os.path.exists(last_audio_file[0]):
+            messagebox.showwarning("Primero descarga la canción", "Debes descargar una canción antes de generar una muestra.")
+            return
+
+        choice = sample_choice_var.get()
+        dur = None
+        tot = current_duration[0] or scraper.get_audio_duration(last_audio_file[0])
+
+        if "30" in choice:
+            dur = 30.0
+        elif "1 Minuto" in choice or "60s" in choice:
+            dur = 60.0
+        elif "2 Minutos" in choice or "120s" in choice:
+            dur = 120.0
+        elif "Mitad" in choice:
+            dur = max(15.0, tot * 0.5) if tot > 0 else 60.0
+        else:
+            dur = None  # auto
+
+        status_var.set("Generando muestra de audio en alta calidad con FFmpeg...")
+        btn_sample_create.config(state="disabled", text="⏳ Creando...")
+
+        def sample_task():
+            try:
+                s_res = scraper.create_audio_sample(last_audio_file[0], duration_sec=dur)
+                last_sample_file[0] = s_res["sample_path"]
+                status_var.set(f"✅ ¡Muestra ({s_res['actual_sample_duration']:.1f}s) guardada con éxito!")
+                btn_sample_play.config(state="normal")
+                messagebox.showinfo("Muestra Lista", f"Muestra creada con éxito ({s_res['actual_sample_duration']:.1f} segundos):\n\n{os.path.basename(s_res['sample_path'])}\n\nUbicación:\n{s_res['sample_path']}")
+            except Exception as e:
+                status_var.set(f"❌ Error al crear muestra: {str(e)}")
+                messagebox.showerror("Error", f"No se pudo crear la muestra: {str(e)}")
+            finally:
+                btn_sample_create.config(state="normal", text="✂️ Guardar Muestra MP3")
+
+        threading.Thread(target=sample_task, daemon=True).start()
+
+    btn_sample_create = tk.Button(
+        sample_inner,
+        text="✂️ Guardar Muestra MP3",
+        command=generate_sample_action,
+        bg="#00DFD8",
+        fg="#000000",
+        relief="flat",
+        font=("Segoe UI", 9, "bold"),
+        padx=10,
+        pady=3,
+        state="disabled",
+        cursor="hand2"
+    )
+    btn_sample_create.pack(side="left", padx=(0, 8))
+
+    def play_sample_audio():
+        if last_sample_file[0] and os.path.exists(last_sample_file[0]):
+            os.startfile(last_sample_file[0])
+
+    btn_sample_play = tk.Button(
+        sample_inner,
+        text="▶️ Reproducir Muestra",
+        command=play_sample_audio,
+        bg="#29292E",
+        fg="#00DFD8",
+        relief="flat",
+        font=("Segoe UI", 9, "bold"),
+        padx=8,
+        pady=3,
+        state="disabled",
+        cursor="hand2"
+    )
+    btn_sample_play.pack(side="left")
+
     # Action Buttons Frame
     btn_frame = tk.Frame(main_frame, bg="#121214")
-    btn_frame.pack(fill="x")
+    btn_frame.pack(fill="x", pady=(4, 0))
 
     def set_ui_loading(is_loading: bool):
         if is_loading:
             btn_download.config(state="disabled", text="⏳ Descifrando y Descargando...")
             btn_paste.config(state="disabled")
+            btn_sample_create.config(state="disabled")
         else:
             btn_download.config(state="normal", text="🚀 DESCARGAR CANCIÓN")
             btn_paste.config(state="normal")
+            if last_audio_file[0] and os.path.exists(last_audio_file[0]):
+                btn_sample_create.config(state="normal")
 
     def run_download_thread():
         url = url_entry.get().strip()
@@ -565,9 +805,12 @@ def launch_gui():
 
                 info = res["info"]
                 last_audio_file[0] = res["mp3_path"]
+                current_duration[0] = res.get("duration", 0.0)
 
                 lbl_song_title.config(text=f"🎵 {info.get('title', 'Suno Track')}")
-                lbl_song_tags.config(text=f"🏷️ {info.get('tags') or 'Sin estilo especificado'}")
+                dur_m = int(res['duration'] // 60)
+                dur_s = int(res['duration'] % 60)
+                lbl_song_meta.config(text=f"🏷️ {info.get('tags') or 'Sin estilo'}  |  ⏱️ Duración: {dur_m}:{dur_s:02d}")
 
                 txt_lyrics.config(state="normal")
                 txt_lyrics.delete("1.0", "end")
@@ -586,9 +829,10 @@ def launch_gui():
                         pass
 
                 progress_bar["value"] = 100
-                status_var.set(f"✅ ¡MP3 listo para reproducir! ({os.path.basename(res['mp3_path'])})")
+                status_var.set(f"✅ ¡MP3 listo para reproducir o recortar muestra! ({os.path.basename(res['mp3_path'])})")
                 btn_play.config(state="normal")
-                messagebox.showinfo("¡Descarga Exitosa!", f"Canción MP3 (320 kbps) lista:\n\n{info.get('title')}\n\nUbicación:\n{res['mp3_path']}")
+                btn_sample_create.config(state="normal")
+                messagebox.showinfo("¡Descarga Exitosa!", f"Canción MP3 (320 kbps) lista:\n\n{info.get('title')}\nDuración: {dur_m}:{dur_s:02d}\n\nUbicación:\n{res['mp3_path']}")
 
             except Exception as e:
                 status_var.set(f"❌ Error: {str(e)}")
@@ -682,3 +926,4 @@ def launch_gui():
 
 if __name__ == "__main__":
     launch_cli()
+
