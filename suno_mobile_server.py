@@ -1,7 +1,7 @@
 """
 Servidor Web Móvil para Suno AI Downloader
 Permite usar la aplicación desde cualquier celular (Android / iOS) o navegador web en PC.
-Soporta descarga en MP3 (320 kbps), WAV Lossless y Separación de Pista y Voz.
+Soporta preescucha / visualización previa, descarga en MP3 320 kbps, WAV Lossless y Separación de Pista y Voz.
 """
 
 import os
@@ -74,7 +74,7 @@ HTML_MOBILE_UI = """
     <style>
         :root {
             --bg: #09090b;
-            --card-bg: rgba(24, 24, 27, 0.85);
+            --card-bg: rgba(24, 24, 27, 0.88);
             --card-border: rgba(255, 255, 255, 0.12);
             --primary: #FF0080;
             --primary-gradient: linear-gradient(135deg, #FF0080 0%, #7928CA 100%);
@@ -275,11 +275,15 @@ HTML_MOBILE_UI = """
             gap: 14px;
             align-items: center;
             margin-bottom: 16px;
+            background: rgba(10, 10, 14, 0.5);
+            padding: 12px;
+            border-radius: 16px;
+            border: 1px solid var(--card-border);
         }
 
         .cover-img {
-            width: 76px;
-            height: 76px;
+            width: 80px;
+            height: 80px;
             border-radius: 14px;
             object-fit: cover;
             background: #27272a;
@@ -338,10 +342,67 @@ HTML_MOBILE_UI = """
             text-transform: uppercase;
         }
 
+        /* Audio Player Box with Visualizer */
+        .player-box {
+            background: rgba(15, 15, 20, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 14px;
+            margin-bottom: 14px;
+        }
+
+        .player-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .player-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #FFFFFF;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Equalizer Soundwave Bars */
+        .soundwave {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            height: 14px;
+        }
+
+        .soundwave span {
+            display: block;
+            width: 3px;
+            height: 4px;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: height 0.2s;
+        }
+
+        .soundwave.playing span {
+            animation: wave 1s ease-in-out infinite alternate;
+        }
+
+        .soundwave.playing span:nth-child(1) { animation-delay: 0.1s; height: 12px; }
+        .soundwave.playing span:nth-child(2) { animation-delay: 0.3s; height: 8px; }
+        .soundwave.playing span:nth-child(3) { animation-delay: 0.2s; height: 14px; }
+        .soundwave.playing span:nth-child(4) { animation-delay: 0.4s; height: 10px; }
+
+        @keyframes wave {
+            0% { height: 3px; }
+            100% { height: 14px; }
+        }
+
         .audio-player {
             width: 100%;
-            margin-bottom: 12px;
+            margin-top: 4px;
             border-radius: 30px;
+            outline: none;
         }
 
         .btn-save-phone {
@@ -358,7 +419,7 @@ HTML_MOBILE_UI = """
             justify-content: center;
             gap: 8px;
             box-shadow: 0 4px 15px rgba(16, 185, 129, 0.35);
-            margin-bottom: 16px;
+            margin-top: 10px;
             transition: transform 0.1s;
         }
 
@@ -368,8 +429,8 @@ HTML_MOBILE_UI = """
 
         /* 🎤 Stem Separation Section */
         .stem-section {
-            background: rgba(26, 18, 38, 0.85);
-            border: 1px solid rgba(255, 0, 128, 0.35);
+            background: rgba(26, 18, 38, 0.9);
+            border: 1px solid rgba(255, 0, 128, 0.4);
             border-radius: 18px;
             padding: 16px;
             margin-top: 18px;
@@ -439,22 +500,28 @@ HTML_MOBILE_UI = """
 
         .stem-result-box {
             display: none;
-            margin-top: 14px;
+            margin-top: 16px;
             animation: fadeIn 0.3s ease;
         }
 
         .stem-card {
-            background: rgba(10, 10, 14, 0.6);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 14px;
-            padding: 12px;
-            margin-bottom: 10px;
+            background: rgba(10, 10, 14, 0.75);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 15px;
+            padding: 14px;
+            margin-bottom: 12px;
+        }
+
+        .stem-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
         }
 
         .stem-card-title {
-            font-size: 12.5px;
+            font-size: 13px;
             font-weight: 700;
-            margin-bottom: 6px;
             display: flex;
             align-items: center;
             gap: 6px;
@@ -468,20 +535,26 @@ HTML_MOBILE_UI = """
             color: #FF0080;
         }
 
+        .stem-card-desc {
+            font-size: 11.5px;
+            color: var(--text-dim);
+            margin-bottom: 8px;
+        }
+
         .btn-save-stem-inst {
             width: 100%;
             background: linear-gradient(135deg, #00DFD8 0%, #0070F3 100%);
             color: #000;
             text-decoration: none;
             border-radius: 10px;
-            padding: 10px;
+            padding: 11px;
             font-weight: 700;
-            font-size: 12.5px;
+            font-size: 13px;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 6px;
-            margin-top: 8px;
+            margin-top: 10px;
         }
 
         .btn-save-stem-vocal {
@@ -490,14 +563,14 @@ HTML_MOBILE_UI = """
             color: #fff;
             text-decoration: none;
             border-radius: 10px;
-            padding: 10px;
+            padding: 11px;
             font-weight: 700;
-            font-size: 12.5px;
+            font-size: 13px;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 6px;
-            margin-top: 8px;
+            margin-top: 10px;
         }
 
         /* Sample Section (Muestra de Audio) */
@@ -621,7 +694,7 @@ HTML_MOBILE_UI = """
             justify-content: center;
             gap: 6px;
             box-shadow: 0 4px 15px rgba(0, 223, 216, 0.35);
-            margin-top: 8px;
+            margin-top: 10px;
         }
 
         .spinner {
@@ -748,7 +821,7 @@ HTML_MOBILE_UI = """
         <header>
             <div class="logo-badge">⚡ Suno Downloader HQ</div>
             <h1>Descargar & Separar Pistas</h1>
-            <p class="subtitle">Descarga en MP3 320 kbps o WAV Lossless y separa voz e instrumental</p>
+            <p class="subtitle">Visualiza, escucha en línea y descarga en MP3/WAV o separa voz e instrumental</p>
         </header>
 
         <div class="card">
@@ -768,13 +841,14 @@ HTML_MOBILE_UI = """
             </div>
 
             <button class="btn-download" id="btnDownload" onclick="startDownload()">
-                <span>🚀 DESCARGAR CANCIÓN</span>
+                <span>🎧 CARGAR, ESCUCHAR Y DESCARGAR</span>
             </button>
 
             <div id="statusBadge" class="status-badge" style="display: none;"></div>
 
             <!-- Result Box -->
             <div class="result-box" id="resultBox">
+                <!-- Song Metadata Preview -->
                 <div class="song-info">
                     <img id="resCover" class="cover-img" src="" alt="Cover">
                     <div class="song-details">
@@ -787,14 +861,21 @@ HTML_MOBILE_UI = """
                     </div>
                 </div>
 
-                <!-- Full Track Player & Download -->
-                <audio id="resAudio" class="audio-player" controls preload="metadata">
-                    Tu navegador no soporta el reproductor de audio.
-                </audio>
-
-                <a id="resDownloadLink" class="btn-save-phone" href="" download>
-                    📥 Guardar Canción Completa
-                </a>
+                <!-- Full Track Player with Soundwave -->
+                <div class="player-box">
+                    <div class="player-header">
+                        <span class="player-title">🎵 Reproducir Canción Completa</span>
+                        <div class="soundwave" id="waveMain">
+                            <span></span><span></span><span></span><span></span>
+                        </div>
+                    </div>
+                    <audio id="resAudio" class="audio-player" controls preload="metadata" onplay="setWave('waveMain', true)" onpause="setWave('waveMain', false)" onended="setWave('waveMain', false)">
+                        Tu navegador no soporta el reproductor de audio.
+                    </audio>
+                    <a id="resDownloadLink" class="btn-save-phone" href="" download>
+                        📥 Guardar Canción Completa
+                    </a>
+                </div>
 
                 <!-- 🎤 Dedicated Vocal & Instrumental Stem Separation Section -->
                 <div class="stem-section">
@@ -805,7 +886,7 @@ HTML_MOBILE_UI = """
                         <span class="stem-tag">AI DSP</span>
                     </div>
                     <p class="stem-desc">
-                        Aísla la pista instrumental (música sin voz con graves intactos) y la voz (acapella limpia) para usarlas por separado.
+                        Separa la música en dos pistas individuales para escucharlas en línea antes de guardarlas:
                     </p>
 
                     <button class="btn-create-stem" id="btnCreateStem" onclick="separateStems()">
@@ -816,10 +897,16 @@ HTML_MOBILE_UI = """
                     <div class="stem-result-box" id="stemResultBox">
                         <!-- Instrumental Card -->
                         <div class="stem-card">
-                            <div class="stem-card-title inst">
-                                <span>🎹 Pista Instrumental (Música / Karaoke)</span>
+                            <div class="stem-card-header">
+                                <div class="stem-card-title inst">
+                                    <span>🎹 Pista Instrumental (Música / Karaoke)</span>
+                                </div>
+                                <div class="soundwave" id="waveInst">
+                                    <span></span><span></span><span></span><span></span>
+                                </div>
                             </div>
-                            <audio id="instAudioPlayer" class="audio-player" controls preload="metadata"></audio>
+                            <div class="stem-card-desc">Escucha el instrumental sin voz (graves y bombos intactos):</div>
+                            <audio id="instAudioPlayer" class="audio-player" controls preload="metadata" onplay="setWave('waveInst', true)" onpause="setWave('waveInst', false)" onended="setWave('waveInst', false)"></audio>
                             <a id="instDownloadLink" class="btn-save-stem-inst" href="" download>
                                 📥 Guardar Pista Instrumental
                             </a>
@@ -827,10 +914,16 @@ HTML_MOBILE_UI = """
 
                         <!-- Vocal Card -->
                         <div class="stem-card">
-                            <div class="stem-card-title vocal">
-                                <span>🎙️ Solo Voz (Acapella / Voces)</span>
+                            <div class="stem-card-header">
+                                <div class="stem-card-title vocal">
+                                    <span>🎙️ Solo Voz (Acapella / Vocales)</span>
+                                </div>
+                                <div class="soundwave" id="waveVocal">
+                                    <span></span><span></span><span></span><span></span>
+                                </div>
                             </div>
-                            <audio id="vocalAudioPlayer" class="audio-player" controls preload="metadata"></audio>
+                            <div class="stem-card-desc">Escucha la pista vocal limpia y aislada:</div>
+                            <audio id="vocalAudioPlayer" class="audio-player" controls preload="metadata" onplay="setWave('waveVocal', true)" onpause="setWave('waveVocal', false)" onended="setWave('waveVocal', false)"></audio>
                             <a id="vocalDownloadLink" class="btn-save-stem-vocal" href="" download>
                                 📥 Guardar Solo Voz
                             </a>
@@ -842,12 +935,12 @@ HTML_MOBILE_UI = """
                 <div class="sample-section">
                     <div class="sample-header">
                         <div class="sample-title">
-                            <span>✂️ Descargar Muestra (Preview)</span>
+                            <span>✂️ Muestra Recortada (Preview)</span>
                         </div>
                         <span class="sample-tag">Clip</span>
                     </div>
                     <p class="sample-desc" id="sampleDescText">
-                        Obtén un recorte de la canción con suavizado al inicio y final.
+                        Genera un fragmento de la canción con suavizado para preescucha rápida:
                     </p>
 
                     <div class="preset-grid">
@@ -863,10 +956,15 @@ HTML_MOBILE_UI = """
 
                     <!-- Sample Result Sub-Box -->
                     <div class="sample-result-box" id="sampleResultBox">
-                        <div style="font-size: 12px; color: var(--accent); font-weight: 600; margin-bottom: 8px;" id="sampleResultLabel">
-                            🎧 Muestra generada:
+                        <div class="player-header" style="margin-bottom: 6px;">
+                            <span style="font-size: 12px; color: var(--accent); font-weight: 600;" id="sampleResultLabel">
+                                🎧 Escuchar Muestra:
+                            </span>
+                            <div class="soundwave" id="waveSample">
+                                <span></span><span></span><span></span><span></span>
+                            </div>
                         </div>
-                        <audio id="sampleAudioPlayer" class="audio-player" controls preload="metadata"></audio>
+                        <audio id="sampleAudioPlayer" class="audio-player" controls preload="metadata" onplay="setWave('waveSample', true)" onpause="setWave('waveSample', false)" onended="setWave('waveSample', false)"></audio>
                         <a id="sampleDownloadLink" class="btn-save-sample" href="" download>
                             📥 Guardar Muestra
                         </a>
@@ -885,6 +983,14 @@ HTML_MOBILE_UI = """
         let currentFilename = "";
         let currentTotalDuration = 0;
         let selectedPreset = "auto";
+
+        function setWave(id, isPlaying) {
+            const el = document.getElementById(id);
+            if (el) {
+                if (isPlaying) el.classList.add('playing');
+                else el.classList.remove('playing');
+            }
+        }
 
         function setFormat(fmt) {
             selectedFormat = fmt;
@@ -926,9 +1032,9 @@ HTML_MOBILE_UI = """
             const sampleResultBox = document.getElementById('sampleResultBox');
 
             btn.disabled = true;
-            btn.innerHTML = `<div class="spinner"></div> Descifrando ${selectedFormat.toUpperCase()}...`;
+            btn.innerHTML = `<div class="spinner"></div> Procesando audio (${selectedFormat.toUpperCase()})...`;
             statusBadge.style.display = 'block';
-            statusBadge.innerText = `Conectando con Suno y procesando audio (${selectedFormat.toUpperCase()})...`;
+            statusBadge.innerText = `Conectando con Suno y descifrando audio (${selectedFormat.toUpperCase()})...`;
             resultBox.style.display = 'none';
             stemResultBox.style.display = 'none';
             sampleResultBox.style.display = 'none';
@@ -949,7 +1055,7 @@ HTML_MOBILE_UI = """
                 currentFilename = data.filename;
                 currentTotalDuration = data.duration_seconds || 0;
 
-                // Show results
+                // Show results & fill player
                 document.getElementById('resTitle').innerText = data.title;
                 document.getElementById('resTags').innerText = data.tags || 'Suno AI Track';
                 document.getElementById('resCover').src = data.cover_url || '';
@@ -969,7 +1075,7 @@ HTML_MOBILE_UI = """
                 document.getElementById('sampleDescText').innerText = 
                     `Canción de ${data.duration_formatted || 'duración estándar'}. Duración de muestra sugerida: ${suggestedDur}.`;
 
-                statusBadge.innerText = `✅ ¡Canción descargada con éxito en ${selectedFormat.toUpperCase()}!`;
+                statusBadge.innerText = `✅ ¡Canción lista para escuchar y descargar en ${selectedFormat.toUpperCase()}!`;
                 resultBox.style.display = 'block';
                 loadHistory();
 
@@ -978,13 +1084,13 @@ HTML_MOBILE_UI = """
                 statusBadge.innerText = '❌ ' + err.message;
             } finally {
                 btn.disabled = false;
-                btn.innerHTML = '🚀 DESCARGAR CANCIÓN';
+                btn.innerHTML = '<span>🎧 CARGAR, ESCUCHAR Y DESCARGAR</span>';
             }
         }
 
         async function separateStems() {
             if (!currentFilename) {
-                alert('Primero descarga una canción.');
+                alert('Primero carga una canción.');
                 return;
             }
 
@@ -1035,7 +1141,7 @@ HTML_MOBILE_UI = """
 
         async function generateSample() {
             if (!currentFilename) {
-                alert('Primero descarga una canción.');
+                alert('Primero carga una canción.');
                 return;
             }
 
