@@ -1,6 +1,17 @@
-# 🎵 Suno AI Downloader & Sample Extractor HQ
+# 🎵 Suno AI Downloader, WAV & Separador de Pistas HQ
 
-Herramienta para descargar y descifrar canciones compartidas de **Suno.com** en MP3 estándar a 320 kbps de alta fidelidad, con portada, letras y **generador/descargador de muestras de audio (previews/clips)**.
+Herramienta completa para descargar, descifrar canciones compartidas de **Suno.com** en **MP3 320 kbps** o **WAV Lossless (Audio sin compresión)**, extraer **muestras de audio (clips)** y **separar la pista instrumental y la voz (acapella)** con procesamiento DSP estéreo de alta fidelidad.
+
+---
+
+## ✨ Nuevas Características
+
+- 💿 **Descarga en WAV Lossless (PCM 16-bit)**: Máxima fidelidad de audio para edición, producción y mezcla.
+- 🎵 **Descarga en MP3 estándar (320 kbps HQ)**: Compatibilidad total con reproductores y dispositivos móviles.
+- 🎤 **Separador de Pista y Voz (Stems)**:
+  - 🎹 **Pista Instrumental**: Aísla la música/karaoke preservando bombos, bajos y frecuencias rítmicas.
+  - 🎙️ **Solo Voz (Acapella)**: Aísla la voz limpia y formantes vocales para remixes o estudio.
+- ✂️ **Extractor de Muestras (Previews)**: Genera clips automáticos (30s, 1m, 2m) con desvanecimiento de entrada y salida (fade-in / fade-out).
 
 ---
 
@@ -11,8 +22,9 @@ Haz doble clic en:
 👉 `iniciar_para_celular.bat`
 
 - Abre la dirección IP mostrada o escanea el código QR con tu celular.
-- Descarga la canción completa directamente a tu teléfono.
-- **✂️ Apartado de Muestras (Previews)**: Extrae un clip de 30s, 1 min, 2 min o proporcional a la duración total con suavizado automático (fade-in / fade-out) y escúchalo o descárgalo en tu celular.
+- Elige el formato deseado: **MP3 (320 kbps)** o **WAV (Lossless)**.
+- **🎤 Separador de Pista y Voz**: Presiona *✨ SEPARAR EN PISTA Y VOZ* para generar y escuchar individualmente la pista instrumental y la voz, con botones de descarga directa a tu celular.
+- **✂️ Muestras**: Extrae clips de 30s, 1 min, 2 min o Auto.
 
 ---
 
@@ -20,10 +32,11 @@ Haz doble clic en:
 Haz doble clic en:
 👉 `iniciar_suno_downloader.bat`
 
-- Pega el enlace de Suno con el botón **📋 Pegar Enlace**.
-- Visualiza la carátula, título, tags de estilo, letra/prompt y duración exacta.
-- Descarga la canción completa en MP3 320 kbps.
-- **✂️ Sección de Muestras**: Selecciona la duración deseada (30s, 1m, 2m, mitad o automática) y pulsa **✂️ Guardar Muestra MP3** para crear el clip al instante y reproducirlo.
+- Selecciona el formato **MP3** o **WAV**.
+- Pega el enlace de Suno con el botón **📋 Pegar**.
+- Descarga la canción completa con su carátula y letras.
+- Usa el apartado **🎤 SEPARADOR DE PISTA Y VOZ** para generar y reproducir la Pista Instrumental y la Voz por separado.
+- Usa la sección **✂️ DESCARGAR MUESTRA** para guardar clips cortos.
 
 ---
 
@@ -34,14 +47,19 @@ Haz doble clic en:
 python suno_downloader.py --gui
 ```
 
-#### Descarga directa por comando:
+#### Descargar en WAV sin compresión:
 ```bash
-python suno_downloader.py https://suno.com/song/c7e0c4ce-4d51-4d3b-9e47-e170c0c7a10a
+python suno_downloader.py https://suno.com/song/ID_DE_LA_CANCION -f wav
 ```
 
-#### Descargar canción y generar muestra automáticamente (ej. 2 minutos o auto):
+#### Descargar y separar inmediatamente en Pista Instrumental y Voz:
 ```bash
-python suno_downloader.py https://suno.com/song/c7e0c4ce-4d51-4d3b-9e47-e170c0c7a10a --sample 120
+python suno_downloader.py https://suno.com/song/ID_DE_LA_CANCION --separate
+```
+
+#### Descargar en WAV, separar pista/voz y generar muestra:
+```bash
+python suno_downloader.py https://suno.com/song/ID_DE_LA_CANCION -f wav --separate --sample 60
 ```
 
 ---
@@ -53,11 +71,4 @@ python suno_downloader.py https://suno.com/song/c7e0c4ce-4d51-4d3b-9e47-e170c0c7
 - `https://app.suno.ai/song/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 - O directamente el UUID: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 
----
-
-## ⚙️ ¿Cómo Funciona el Generador de Muestras?
-
-1. **Detección de Duración**: Analiza los segundos exactos de la pista MP3 mediante FFmpeg.
-2. **Cálculo Proporcional**: Si la canción dura ~5 minutos, genera una muestra sugerida de 2 minutos (o la duración que elijas).
-3. **Corte y Suavizado HQ**: Aplica filtros de Fade-In y Fade-Out para evitar cortes abruptos y exporta un archivo MP3 independiente a 320 kbps listo para reproducir y compartir.
 

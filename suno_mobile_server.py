@@ -1,13 +1,14 @@
 """
 Servidor Web Móvil para Suno AI Downloader
-Permite usar la aplicación desde cualquier celular (Android / iOS) conectado a la misma red WiFi.
+Permite usar la aplicación desde cualquier celular (Android / iOS) o navegador web en PC.
+Soporta descarga en MP3 (320 kbps), WAV Lossless y Separación de Pista y Voz.
 """
 
 import os
 import sys
 import socket
 import urllib.parse
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import qrcode
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
@@ -15,7 +16,7 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# Importar el motor de descarga de suno_downloader sin modificar nada existente
+# Importar el motor de descarga y procesamiento de audio
 from suno_downloader import SunoScraper, sanitize_filename
 
 # Asegurar UTF-8 en consola de Windows
@@ -25,7 +26,7 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-app = FastAPI(title="Suno AI Mobile Downloader")
+app = FastAPI(title="Suno AI Mobile & Web Downloader HQ")
 scraper = SunoScraper()
 DOWNLOADS_DIR = os.path.abspath("downloads")
 os.makedirs(DOWNLOADS_DIR, exist_ok=True)
@@ -45,6 +46,7 @@ def get_local_ip() -> str:
 
 class DownloadRequest(BaseModel):
     url: str
+    format: Optional[str] = "mp3"
 
 
 class SampleRequest(BaseModel):
@@ -54,29 +56,35 @@ class SampleRequest(BaseModel):
     preset: Optional[str] = None
 
 
+class SeparateRequest(BaseModel):
+    filename: str
+    format: Optional[str] = "mp3"
+
+
 HTML_MOBILE_UI = """
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Suno AI Mobile Downloader & Muestras</title>
+    <title>Suno AI Downloader & Separador de Pistas HQ</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg: #09090b;
-            --card-bg: rgba(24, 24, 27, 0.8);
-            --card-border: rgba(255, 255, 255, 0.1);
+            --card-bg: rgba(24, 24, 27, 0.85);
+            --card-border: rgba(255, 255, 255, 0.12);
             --primary: #FF0080;
             --primary-gradient: linear-gradient(135deg, #FF0080 0%, #7928CA 100%);
             --accent: #00DFD8;
             --accent-gradient: linear-gradient(135deg, #00DFD8 0%, #0070F3 100%);
+            --stem-gradient: linear-gradient(135deg, #FF0080 0%, #F59E0B 100%);
             --sample-gradient: linear-gradient(135deg, #7928CA 0%, #4C1D95 100%);
             --text: #f4f4f5;
             --text-dim: #a1a1aa;
-            --card-sample: rgba(30, 27, 46, 0.7);
+            --card-inner: rgba(30, 27, 46, 0.7);
         }
 
         * {
@@ -91,8 +99,8 @@ HTML_MOBILE_UI = """
             background-color: var(--bg);
             background-image: 
                 radial-gradient(circle at 10% 20%, rgba(255, 0, 128, 0.15) 0%, transparent 40%),
-                radial-gradient(circle at 90% 80%, rgba(121, 40, 202, 0.2) 0%, transparent 40%),
-                radial-gradient(circle at 50% 50%, rgba(0, 223, 216, 0.06) 0%, transparent 50%);
+                radial-gradient(circle at 90% 80%, rgba(121, 40, 202, 0.22) 0%, transparent 40%),
+                radial-gradient(circle at 50% 50%, rgba(0, 223, 216, 0.08) 0%, transparent 50%);
             background-attachment: fixed;
             color: var(--text);
             min-height: 100vh;
@@ -104,7 +112,7 @@ HTML_MOBILE_UI = """
 
         .container {
             width: 100%;
-            max-width: 490px;
+            max-width: 500px;
         }
 
         header {
@@ -127,7 +135,7 @@ HTML_MOBILE_UI = """
         }
 
         h1 {
-            font-size: 27px;
+            font-size: 26px;
             font-weight: 800;
             letter-spacing: -0.5px;
             background: linear-gradient(to right, #FFFFFF, #E4E4E7);
@@ -150,6 +158,37 @@ HTML_MOBILE_UI = """
             padding: 20px;
             margin-bottom: 20px;
             box-shadow: 0 10px 35px rgba(0, 0, 0, 0.45);
+        }
+
+        /* Format selector bar */
+        .format-selector {
+            display: flex;
+            background: rgba(10, 10, 12, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 4px;
+            margin-bottom: 14px;
+            gap: 4px;
+        }
+
+        .format-tab {
+            flex: 1;
+            padding: 9px 6px;
+            text-align: center;
+            font-size: 12.5px;
+            font-weight: 700;
+            color: var(--text-dim);
+            border-radius: 9px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .format-tab.active {
+            background: var(--primary-gradient);
+            color: #ffffff;
+            box-shadow: 0 2px 10px rgba(255, 0, 128, 0.35);
         }
 
         .input-group {
@@ -239,8 +278,8 @@ HTML_MOBILE_UI = """
         }
 
         .cover-img {
-            width: 74px;
-            height: 74px;
+            width: 76px;
+            height: 76px;
             border-radius: 14px;
             object-fit: cover;
             background: #27272a;
@@ -271,6 +310,13 @@ HTML_MOBILE_UI = """
             text-overflow: ellipsis;
         }
 
+        .badges-row {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+            flex-wrap: wrap;
+        }
+
         .song-duration-badge {
             display: inline-block;
             background: rgba(0, 223, 216, 0.15);
@@ -279,12 +325,22 @@ HTML_MOBILE_UI = """
             border-radius: 6px;
             font-size: 11px;
             font-weight: 600;
-            margin-top: 4px;
+        }
+
+        .song-format-badge {
+            display: inline-block;
+            background: rgba(255, 0, 128, 0.18);
+            color: #FF0080;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
         }
 
         .audio-player {
             width: 100%;
-            margin-bottom: 14px;
+            margin-bottom: 12px;
             border-radius: 30px;
         }
 
@@ -294,9 +350,9 @@ HTML_MOBILE_UI = """
             color: #fff;
             text-decoration: none;
             border-radius: 12px;
-            padding: 14px;
+            padding: 13px;
             font-weight: 700;
-            font-size: 14px;
+            font-size: 13.5px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -310,13 +366,147 @@ HTML_MOBILE_UI = """
             transform: scale(0.98);
         }
 
-        /* Sample Section (Muestra de Audio) */
-        .sample-section {
-            background: var(--card-sample);
-            border: 1px solid rgba(121, 40, 202, 0.35);
+        /* 🎤 Stem Separation Section */
+        .stem-section {
+            background: rgba(26, 18, 38, 0.85);
+            border: 1px solid rgba(255, 0, 128, 0.35);
             border-radius: 18px;
             padding: 16px;
             margin-top: 18px;
+            box-shadow: 0 6px 24px rgba(255, 0, 128, 0.15);
+        }
+
+        .stem-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .stem-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #FFFFFF;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .stem-tag {
+            background: rgba(255, 0, 128, 0.25);
+            color: #FF0080;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 8px;
+            text-transform: uppercase;
+        }
+
+        .stem-desc {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+
+        .btn-create-stem {
+            width: 100%;
+            background: var(--stem-gradient);
+            border: none;
+            border-radius: 12px;
+            padding: 13px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 13.5px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            box-shadow: 0 4px 15px rgba(255, 0, 128, 0.3);
+            transition: transform 0.1s, opacity 0.2s;
+        }
+
+        .btn-create-stem:active {
+            transform: scale(0.98);
+        }
+
+        .btn-create-stem:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .stem-result-box {
+            display: none;
+            margin-top: 14px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .stem-card {
+            background: rgba(10, 10, 14, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 14px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+
+        .stem-card-title {
+            font-size: 12.5px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .stem-card-title.inst {
+            color: var(--accent);
+        }
+
+        .stem-card-title.vocal {
+            color: #FF0080;
+        }
+
+        .btn-save-stem-inst {
+            width: 100%;
+            background: linear-gradient(135deg, #00DFD8 0%, #0070F3 100%);
+            color: #000;
+            text-decoration: none;
+            border-radius: 10px;
+            padding: 10px;
+            font-weight: 700;
+            font-size: 12.5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .btn-save-stem-vocal {
+            width: 100%;
+            background: var(--primary-gradient);
+            color: #fff;
+            text-decoration: none;
+            border-radius: 10px;
+            padding: 10px;
+            font-weight: 700;
+            font-size: 12.5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        /* Sample Section (Muestra de Audio) */
+        .sample-section {
+            background: var(--card-inner);
+            border: 1px solid rgba(121, 40, 202, 0.35);
+            border-radius: 18px;
+            padding: 16px;
+            margin-top: 16px;
             box-shadow: 0 6px 24px rgba(121, 40, 202, 0.15);
         }
 
@@ -324,7 +514,7 @@ HTML_MOBILE_UI = """
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
         }
 
         .sample-title {
@@ -337,8 +527,8 @@ HTML_MOBILE_UI = """
         }
 
         .sample-tag {
-            background: rgba(255, 0, 128, 0.2);
-            color: #FF0080;
+            background: rgba(121, 40, 202, 0.3);
+            color: #A855F7;
             font-size: 10px;
             font-weight: 700;
             padding: 2px 7px;
@@ -357,14 +547,14 @@ HTML_MOBILE_UI = """
             display: grid;
             grid-template-columns: repeat(4, 1fr);
             gap: 6px;
-            margin-bottom: 14px;
+            margin-bottom: 12px;
         }
 
         .preset-btn {
             background: rgba(255, 255, 255, 0.08);
             border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: 10px;
-            padding: 9px 4px;
+            padding: 8px 4px;
             color: #e4e4e7;
             font-size: 12px;
             font-weight: 600;
@@ -374,10 +564,10 @@ HTML_MOBILE_UI = """
         }
 
         .preset-btn.active {
-            background: var(--primary-gradient);
-            border-color: var(--primary);
+            background: var(--sample-gradient);
+            border-color: #7928CA;
             color: #fff;
-            box-shadow: 0 2px 10px rgba(255, 0, 128, 0.35);
+            box-shadow: 0 2px 10px rgba(121, 40, 202, 0.4);
         }
 
         .btn-create-sample {
@@ -411,8 +601,8 @@ HTML_MOBILE_UI = """
         /* Sample Result Box */
         .sample-result-box {
             display: none;
-            margin-top: 14px;
-            padding-top: 12px;
+            margin-top: 12px;
+            padding-top: 10px;
             border-top: 1px dashed rgba(255, 255, 255, 0.15);
             animation: fadeIn 0.3s ease;
         }
@@ -423,15 +613,15 @@ HTML_MOBILE_UI = """
             color: #000;
             text-decoration: none;
             border-radius: 12px;
-            padding: 13px;
+            padding: 12px;
             font-weight: 700;
-            font-size: 13.5px;
+            font-size: 13px;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 6px;
             box-shadow: 0 4px 15px rgba(0, 223, 216, 0.35);
-            margin-top: 10px;
+            margin-top: 8px;
         }
 
         .spinner {
@@ -483,9 +673,19 @@ HTML_MOBILE_UI = """
             gap: 10px;
         }
 
+        .history-item.is-inst {
+            border-color: rgba(0, 223, 216, 0.3);
+            background: rgba(18, 28, 36, 0.6);
+        }
+
+        .history-item.is-vocal {
+            border-color: rgba(255, 0, 128, 0.3);
+            background: rgba(36, 18, 28, 0.6);
+        }
+
         .history-item.is-sample {
-            border-color: rgba(0, 223, 216, 0.25);
-            background: rgba(18, 28, 36, 0.5);
+            border-color: rgba(121, 40, 202, 0.3);
+            background: rgba(28, 18, 36, 0.6);
         }
 
         .history-name {
@@ -502,13 +702,37 @@ HTML_MOBILE_UI = """
             padding: 2px 6px;
             border-radius: 6px;
             font-weight: 700;
+            margin-right: 6px;
+            display: inline-block;
+        }
+
+        .history-badge.inst {
             background: rgba(0, 223, 216, 0.2);
             color: var(--accent);
-            margin-right: 4px;
+        }
+
+        .history-badge.vocal {
+            background: rgba(255, 0, 128, 0.2);
+            color: #FF0080;
+        }
+
+        .history-badge.sample {
+            background: rgba(121, 40, 202, 0.25);
+            color: #C084FC;
+        }
+
+        .history-badge.wav {
+            background: rgba(245, 158, 11, 0.2);
+            color: #F59E0B;
+        }
+
+        .history-badge.mp3 {
+            background: rgba(255, 255, 255, 0.15);
+            color: #E4E4E7;
         }
 
         .history-btn {
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.12);
             color: #fff;
             padding: 6px 12px;
             border-radius: 8px;
@@ -523,11 +747,21 @@ HTML_MOBILE_UI = """
     <div class="container">
         <header>
             <div class="logo-badge">⚡ Suno Downloader HQ</div>
-            <h1>Descargar Música y Muestras</h1>
-            <p class="subtitle">Descarga canciones completas o extrae muestras (previews) en MP3 320 kbps</p>
+            <h1>Descargar & Separar Pistas</h1>
+            <p class="subtitle">Descarga en MP3 320 kbps o WAV Lossless y separa voz e instrumental</p>
         </header>
 
         <div class="card">
+            <!-- Format Selector -->
+            <div class="format-selector">
+                <button class="format-tab active" id="tabMp3" onclick="setFormat('mp3')">
+                    🎵 MP3 (320 kbps)
+                </button>
+                <button class="format-tab" id="tabWav" onclick="setFormat('wav')">
+                    💿 WAV (Lossless PCM)
+                </button>
+            </div>
+
             <div class="input-group">
                 <input type="text" id="sunoUrl" placeholder="https://suno.com/song/..." autocomplete="off">
                 <button class="paste-btn" onclick="pasteFromClipboard()">Pegar</button>
@@ -546,7 +780,10 @@ HTML_MOBILE_UI = """
                     <div class="song-details">
                         <div class="song-title" id="resTitle">Título</div>
                         <div class="song-tags" id="resTags">Estilo</div>
-                        <div class="song-duration-badge" id="resDuration">⏱️ 0:00</div>
+                        <div class="badges-row">
+                            <span class="song-duration-badge" id="resDuration">⏱️ 0:00</span>
+                            <span class="song-format-badge" id="resFormat">MP3</span>
+                        </div>
                     </div>
                 </div>
 
@@ -559,27 +796,69 @@ HTML_MOBILE_UI = """
                     📥 Guardar Canción Completa
                 </a>
 
+                <!-- 🎤 Dedicated Vocal & Instrumental Stem Separation Section -->
+                <div class="stem-section">
+                    <div class="stem-header">
+                        <div class="stem-title">
+                            <span>🎤 Separar Pista y Voz (Stems)</span>
+                        </div>
+                        <span class="stem-tag">AI DSP</span>
+                    </div>
+                    <p class="stem-desc">
+                        Aísla la pista instrumental (música sin voz con graves intactos) y la voz (acapella limpia) para usarlas por separado.
+                    </p>
+
+                    <button class="btn-create-stem" id="btnCreateStem" onclick="separateStems()">
+                        <span>✨ SEPARAR EN PISTA Y VOZ</span>
+                    </button>
+
+                    <!-- Stem Results Sub-Box -->
+                    <div class="stem-result-box" id="stemResultBox">
+                        <!-- Instrumental Card -->
+                        <div class="stem-card">
+                            <div class="stem-card-title inst">
+                                <span>🎹 Pista Instrumental (Música / Karaoke)</span>
+                            </div>
+                            <audio id="instAudioPlayer" class="audio-player" controls preload="metadata"></audio>
+                            <a id="instDownloadLink" class="btn-save-stem-inst" href="" download>
+                                📥 Guardar Pista Instrumental
+                            </a>
+                        </div>
+
+                        <!-- Vocal Card -->
+                        <div class="stem-card">
+                            <div class="stem-card-title vocal">
+                                <span>🎙️ Solo Voz (Acapella / Voces)</span>
+                            </div>
+                            <audio id="vocalAudioPlayer" class="audio-player" controls preload="metadata"></audio>
+                            <a id="vocalDownloadLink" class="btn-save-stem-vocal" href="" download>
+                                📥 Guardar Solo Voz
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- ✂️ Dedicated Sample Download Section -->
                 <div class="sample-section">
                     <div class="sample-header">
                         <div class="sample-title">
                             <span>✂️ Descargar Muestra (Preview)</span>
                         </div>
-                        <span class="sample-tag">Clip MP3</span>
+                        <span class="sample-tag">Clip</span>
                     </div>
                     <p class="sample-desc" id="sampleDescText">
-                        Obtén un recorte de la canción para compartir o previsualizar sin descargar la pista entera.
+                        Obtén un recorte de la canción con suavizado al inicio y final.
                     </p>
 
                     <div class="preset-grid">
                         <button class="preset-btn" onclick="selectPreset('30s', this)">⚡ 30s</button>
                         <button class="preset-btn" onclick="selectPreset('60s', this)">⏱️ 1 min</button>
-                        <button class="preset-btn" onclick="selectPreset('120s', this)" id="preset2m">⏳ 2 min</button>
+                        <button class="preset-btn" onclick="selectPreset('120s', this)">⏳ 2 min</button>
                         <button class="preset-btn active" onclick="selectPreset('auto', this)">✨ Auto</button>
                     </div>
 
                     <button class="btn-create-sample" id="btnCreateSample" onclick="generateSample()">
-                        <span>✂️ GENERAR MUESTRA MP3</span>
+                        <span>✂️ GENERAR MUESTRA</span>
                     </button>
 
                     <!-- Sample Result Sub-Box -->
@@ -587,14 +866,13 @@ HTML_MOBILE_UI = """
                         <div style="font-size: 12px; color: var(--accent); font-weight: 600; margin-bottom: 8px;" id="sampleResultLabel">
                             🎧 Muestra generada:
                         </div>
-                        <audio id="sampleAudioPlayer" class="audio-player" controls preload="metadata">
-                            Tu navegador no soporta el reproductor de audio.
-                        </audio>
+                        <audio id="sampleAudioPlayer" class="audio-player" controls preload="metadata"></audio>
                         <a id="sampleDownloadLink" class="btn-save-sample" href="" download>
-                            📥 Guardar Muestra en mi Celular
+                            📥 Guardar Muestra
                         </a>
                     </div>
                 </div>
+
             </div>
         </div>
 
@@ -603,9 +881,16 @@ HTML_MOBILE_UI = """
     </div>
 
     <script>
+        let selectedFormat = "mp3";
         let currentFilename = "";
         let currentTotalDuration = 0;
         let selectedPreset = "auto";
+
+        function setFormat(fmt) {
+            selectedFormat = fmt;
+            document.getElementById('tabMp3').classList.toggle('active', fmt === 'mp3');
+            document.getElementById('tabWav').classList.toggle('active', fmt === 'wav');
+        }
 
         async function pasteFromClipboard() {
             try {
@@ -637,20 +922,22 @@ HTML_MOBILE_UI = """
             const btn = document.getElementById('btnDownload');
             const statusBadge = document.getElementById('statusBadge');
             const resultBox = document.getElementById('resultBox');
+            const stemResultBox = document.getElementById('stemResultBox');
             const sampleResultBox = document.getElementById('sampleResultBox');
 
             btn.disabled = true;
-            btn.innerHTML = '<div class="spinner"></div> Descifrando y procesando...';
+            btn.innerHTML = `<div class="spinner"></div> Descifrando ${selectedFormat.toUpperCase()}...`;
             statusBadge.style.display = 'block';
-            statusBadge.innerText = 'Conectando con Suno y descifrando audio...';
+            statusBadge.innerText = `Conectando con Suno y procesando audio (${selectedFormat.toUpperCase()})...`;
             resultBox.style.display = 'none';
+            stemResultBox.style.display = 'none';
             sampleResultBox.style.display = 'none';
 
             try {
                 const response = await fetch('/api/download', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url })
+                    body: JSON.stringify({ url: url, format: selectedFormat })
                 });
 
                 const data = await response.json();
@@ -666,7 +953,8 @@ HTML_MOBILE_UI = """
                 document.getElementById('resTitle').innerText = data.title;
                 document.getElementById('resTags').innerText = data.tags || 'Suno AI Track';
                 document.getElementById('resCover').src = data.cover_url || '';
-                document.getElementById('resDuration').innerText = `⏱️ Duración: ${data.duration_formatted || 'Desconocida'}`;
+                document.getElementById('resDuration').innerText = `⏱️ ${data.duration_formatted || '0:00'}`;
+                document.getElementById('resFormat').innerText = (data.format || selectedFormat).toUpperCase();
 
                 const audioPlayer = document.getElementById('resAudio');
                 audioPlayer.src = data.download_url;
@@ -674,13 +962,14 @@ HTML_MOBILE_UI = """
                 const dlLink = document.getElementById('resDownloadLink');
                 dlLink.href = data.download_url;
                 dlLink.setAttribute('download', data.filename);
+                dlLink.innerHTML = `📥 Guardar Canción Completa (${(data.format || selectedFormat).toUpperCase()})`;
 
                 // Update sample description with suggested duration
                 const suggestedDur = data.suggested_sample_formatted || '1-2 minutos';
                 document.getElementById('sampleDescText').innerText = 
                     `Canción de ${data.duration_formatted || 'duración estándar'}. Duración de muestra sugerida: ${suggestedDur}.`;
 
-                statusBadge.innerText = '✅ ¡Canción descifrada con éxito!';
+                statusBadge.innerText = `✅ ¡Canción descargada con éxito en ${selectedFormat.toUpperCase()}!`;
                 resultBox.style.display = 'block';
                 loadHistory();
 
@@ -690,6 +979,57 @@ HTML_MOBILE_UI = """
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = '🚀 DESCARGAR CANCIÓN';
+            }
+        }
+
+        async function separateStems() {
+            if (!currentFilename) {
+                alert('Primero descarga una canción.');
+                return;
+            }
+
+            const btn = document.getElementById('btnCreateStem');
+            const stemResultBox = document.getElementById('stemResultBox');
+            const instAudio = document.getElementById('instAudioPlayer');
+            const instDlLink = document.getElementById('instDownloadLink');
+            const vocalAudio = document.getElementById('vocalAudioPlayer');
+            const vocalDlLink = document.getElementById('vocalDownloadLink');
+
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner"></div> Separando Pista y Voz con DSP...';
+
+            try {
+                const response = await fetch('/api/separate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: currentFilename,
+                        format: selectedFormat
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok || data.error) {
+                    throw new Error(data.error || 'Error al separar la pista y la voz.');
+                }
+
+                instAudio.src = data.instrumental_url;
+                instDlLink.href = data.instrumental_url;
+                instDlLink.setAttribute('download', data.instrumental_filename);
+
+                vocalAudio.src = data.vocals_url;
+                vocalDlLink.href = data.vocals_url;
+                vocalDlLink.setAttribute('download', data.vocals_filename);
+
+                stemResultBox.style.display = 'block';
+                loadHistory();
+
+            } catch (err) {
+                alert('Error al separar: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span>✨ SEPARAR EN PISTA Y VOZ</span>';
             }
         }
 
@@ -727,7 +1067,7 @@ HTML_MOBILE_UI = """
                 sampleAudio.src = data.sample_url;
                 sampleDlLink.href = data.sample_url;
                 sampleDlLink.setAttribute('download', data.filename);
-                sampleLabel.innerText = `🎧 Muestra lista (${Math.round(data.sample_duration)}s con suavizado):`;
+                sampleLabel.innerText = `🎧 Muestra lista (${Math.round(data.sample_duration)}s):`;
 
                 sampleResultBox.style.display = 'block';
                 loadHistory();
@@ -736,7 +1076,7 @@ HTML_MOBILE_UI = """
                 alert('Error al generar muestra: ' + err.message);
             } finally {
                 btn.disabled = false;
-                btn.innerHTML = '<span>✂️ GENERAR MUESTRA MP3</span>';
+                btn.innerHTML = '<span>✂️ GENERAR MUESTRA</span>';
             }
         }
 
@@ -754,12 +1094,34 @@ HTML_MOBILE_UI = """
 
                 files.forEach(f => {
                     const item = document.createElement('div');
-                    const isSample = f.name.includes('_muestra_') || f.name.includes('[Muestra');
-                    item.className = 'history-item' + (isSample ? ' is-sample' : '');
-                    
-                    const badge = isSample ? '<span class="history-badge">✂️ Muestra</span>' : '';
+                    const isInst = f.name.includes('_pista_instrumental');
+                    const isVocal = f.name.includes('_solo_voz');
+                    const isSample = f.name.includes('_muestra_');
+                    const isWav = f.filename.endsWith('.wav');
+
+                    let itemClass = 'history-item';
+                    let badge = '';
+
+                    if (isInst) {
+                        itemClass += ' is-inst';
+                        badge += '<span class="history-badge inst">🎹 Instrumental</span>';
+                    } else if (isVocal) {
+                        itemClass += ' is-vocal';
+                        badge += '<span class="history-badge vocal">🎙️ Voz</span>';
+                    } else if (isSample) {
+                        itemClass += ' is-sample';
+                        badge += '<span class="history-badge sample">✂️ Muestra</span>';
+                    }
+
+                    if (isWav) {
+                        badge += '<span class="history-badge wav">WAV</span>';
+                    } else {
+                        badge += '<span class="history-badge mp3">MP3</span>';
+                    }
+
+                    item.className = itemClass;
                     item.innerHTML = `
-                        <span class="history-name">${badge}🎵 ${f.name}</span>
+                        <span class="history-name">${badge} ${f.name}</span>
                         <a class="history-btn" href="/downloads/${encodeURIComponent(f.filename)}" download>Descargar</a>
                     `;
                     list.appendChild(item);
@@ -789,9 +1151,10 @@ async def api_download(req: DownloadRequest):
         if not url:
             raise HTTPException(status_code=400, detail="URL requerida")
 
-        res = scraper.download_song(url, output_dir=DOWNLOADS_DIR)
+        fmt = (req.format or "mp3").lower().strip()
+        res = scraper.download_song(url, output_dir=DOWNLOADS_DIR, audio_format=fmt)
         info = res["info"]
-        mp3_file = os.path.basename(res["mp3_path"])
+        audio_file = os.path.basename(res["audio_path"])
         duration = res.get("duration", 0.0)
         dur_m = int(duration // 60)
         dur_s = int(duration % 60)
@@ -802,7 +1165,7 @@ async def api_download(req: DownloadRequest):
         if duration <= 60:
             suggested_sec = 30
         elif duration > 180:
-            suggested_sec = 120  # e.g. 2 min para canciones largas
+            suggested_sec = 120
         suggested_formatted = f"{int(suggested_sec // 60)} min" if suggested_sec >= 60 else f"{int(suggested_sec)} seg"
 
         cover_url = ""
@@ -816,8 +1179,9 @@ async def api_download(req: DownloadRequest):
             "success": True,
             "title": info["title"],
             "tags": info.get("tags", ""),
-            "filename": mp3_file,
-            "download_url": f"/downloads/{urllib.parse.quote(mp3_file)}",
+            "filename": audio_file,
+            "format": res.get("format", fmt),
+            "download_url": f"/downloads/{urllib.parse.quote(audio_file)}",
             "cover_url": cover_url,
             "duration_seconds": duration,
             "duration_formatted": duration_formatted,
@@ -828,9 +1192,45 @@ async def api_download(req: DownloadRequest):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+@app.post("/api/separate")
+async def api_separate_stems(req: SeparateRequest):
+    """Separa la canción en Pista Instrumental y Solo Voz."""
+    try:
+        filename = req.filename.strip()
+        if not filename:
+            raise HTTPException(status_code=400, detail="Nombre de archivo requerido")
+
+        input_path = os.path.join(DOWNLOADS_DIR, filename)
+        if not os.path.exists(input_path):
+            raise HTTPException(status_code=404, detail="El archivo no existe en descargas")
+
+        fmt = (req.format or ("wav" if filename.lower().endswith(".wav") else "mp3")).lower().strip()
+
+        sep_res = scraper.separate_vocals_and_instrumental(
+            input_audio=input_path,
+            output_dir=DOWNLOADS_DIR,
+            output_format=fmt
+        )
+
+        inst_file = sep_res["instrumental_filename"]
+        vocal_file = sep_res["vocals_filename"]
+
+        return {
+            "success": True,
+            "instrumental_filename": inst_file,
+            "instrumental_url": f"/downloads/{urllib.parse.quote(inst_file)}",
+            "vocals_filename": vocal_file,
+            "vocals_url": f"/downloads/{urllib.parse.quote(vocal_file)}",
+            "duration": sep_res.get("duration", 0.0),
+            "format": fmt
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.post("/api/sample")
 async def api_generate_sample(req: SampleRequest):
-    """Genera una muestra/preview en MP3 de una canción existente."""
+    """Genera una muestra/preview de una canción existente."""
     try:
         filename = req.filename.strip()
         if not filename:
@@ -853,7 +1253,7 @@ async def api_generate_sample(req: SampleRequest):
         elif preset in ("half", "50%"):
             duration_sec = max(15.0, total_dur * 0.5) if total_dur > 0 else 60.0
         elif preset == "auto":
-            duration_sec = None  # SunoScraper calculará automáticamente (ej. 2 min si > 3m)
+            duration_sec = None
 
         sample_res = scraper.create_audio_sample(
             input_mp3=input_path,
@@ -879,9 +1279,24 @@ async def download_file_endpoint(filename: str):
     file_path = os.path.join(DOWNLOADS_DIR, filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
+
+    media_type = "application/octet-stream"
+    if filename.endswith(".mp3"):
+        media_type = "audio/mpeg"
+    elif filename.endswith(".wav"):
+        media_type = "audio/wav"
+    elif filename.endswith(".m4a"):
+        media_type = "audio/mp4"
+    elif filename.endswith(".jpeg") or filename.endswith(".jpg"):
+        media_type = "image/jpeg"
+    elif filename.endswith(".png"):
+        media_type = "image/png"
+    elif filename.endswith(".txt"):
+        media_type = "text/plain; charset=utf-8"
+
     return FileResponse(
         file_path,
-        media_type="audio/mpeg" if filename.endswith(".mp3") else "image/jpeg",
+        media_type=media_type,
         filename=filename
     )
 
@@ -890,15 +1305,21 @@ async def download_file_endpoint(filename: str):
 async def list_downloaded_files():
     files = []
     if os.path.exists(DOWNLOADS_DIR):
+        file_entries = []
         for f in os.listdir(DOWNLOADS_DIR):
-            if f.endswith(".mp3"):
-                clean_name = f.replace(".mp3", "")
-                files.append({
-                    "filename": f,
-                    "name": clean_name
-                })
-    files.reverse()
-    return files[:20]
+            if f.endswith((".mp3", ".wav")):
+                full_path = os.path.join(DOWNLOADS_DIR, f)
+                mtime = os.path.getmtime(full_path)
+                file_entries.append((mtime, f))
+        
+        file_entries.sort(key=lambda x: x[0], reverse=True)
+        for _, f in file_entries[:30]:
+            clean_name = f.rsplit(".", 1)[0]
+            files.append({
+                "filename": f,
+                "name": clean_name
+            })
+    return files
 
 
 def run_server():
@@ -907,7 +1328,7 @@ def run_server():
     mobile_url = f"http://{local_ip}:{port}"
 
     print("\n" + "="*58)
-    print(" 🚀 SERVIDOR MÓVIL DE SUNO AI ACTIVADO")
+    print(" 🚀 SERVIDOR MÓVIL DE SUNO AI ACTIVADO (HQ)")
     print("="*58)
     print(f"\n📲 ABRE ESTE ENLACE EN EL NAVEGADOR DE TU CELULAR:\n")
     print(f"👉 \033[92m{mobile_url}\033[0m\n")
@@ -933,4 +1354,3 @@ def run_server():
 
 if __name__ == "__main__":
     run_server()
-
