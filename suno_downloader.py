@@ -386,6 +386,17 @@ class SunoScraper:
         pista_path = os.path.join(out_dir, f"{base_name}_pista_instrumental.{fmt}")
         voz_path = os.path.join(out_dir, f"{base_name}_solo_voz.{fmt}")
 
+        if os.path.exists(pista_path) and os.path.exists(voz_path) and os.path.getsize(pista_path) > 50000 and os.path.getsize(voz_path) > 50000:
+            dur = self.get_audio_duration(pista_path)
+            return {
+                "instrumental_path": pista_path,
+                "vocals_path": voz_path,
+                "instrumental_filename": os.path.basename(pista_path),
+                "vocals_filename": os.path.basename(voz_path),
+                "duration": dur,
+                "format": fmt
+            }
+
         if progress_callback:
             progress_callback("separando instrumental", 0, 0, 20.0)
 
@@ -488,13 +499,18 @@ class SunoScraper:
         audio_out = os.path.join(output_dir, f"{base_name}.{ext}")
         stream_url = info.get("audio_url") or f"https://d2lwuy8qc234o3.cloudfront.net/1/clip/{song_id}.m4a"
 
-        final_audio_path = self.decrypt_and_download(
-            song_id,
-            stream_url,
-            audio_out,
-            audio_format=ext,
-            progress_callback=progress_callback
-        )
+        if os.path.exists(audio_out) and os.path.getsize(audio_out) > 50000:
+            final_audio_path = audio_out
+            if progress_callback:
+                progress_callback("completado", 1, 1, 100.0)
+        else:
+            final_audio_path = self.decrypt_and_download(
+                song_id,
+                stream_url,
+                audio_out,
+                audio_format=ext,
+                progress_callback=progress_callback
+            )
         result["audio_path"] = final_audio_path
         result["mp3_path"] = final_audio_path  # Compatibilidad hacia atrás
         result["duration"] = self.get_audio_duration(final_audio_path)

@@ -1017,6 +1017,19 @@ HTML_MOBILE_UI = """
             }
         }
 
+        // Permitir presionar Enter en el input
+        document.addEventListener("DOMContentLoaded", () => {
+            const inp = document.getElementById('sunoUrl');
+            if (inp) {
+                inp.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        startDownload();
+                    }
+                });
+            }
+        });
+
         async function startDownload() {
             const urlInput = document.getElementById('sunoUrl');
             const url = urlInput.value.trim();
@@ -1035,16 +1048,21 @@ HTML_MOBILE_UI = """
             btn.innerHTML = `<div class="spinner"></div> Procesando audio (${selectedFormat.toUpperCase()})...`;
             statusBadge.style.display = 'block';
             statusBadge.innerText = `Conectando con Suno y descifrando audio (${selectedFormat.toUpperCase()})...`;
-            resultBox.style.display = 'none';
+            
             stemResultBox.style.display = 'none';
             sampleResultBox.style.display = 'none';
 
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 60000);
+
                 const response = await fetch('/api/download', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url, format: selectedFormat })
+                    body: JSON.stringify({ url: url, format: selectedFormat }),
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
 
                 const data = await response.json();
 
@@ -1064,6 +1082,7 @@ HTML_MOBILE_UI = """
 
                 const audioPlayer = document.getElementById('resAudio');
                 audioPlayer.src = data.download_url;
+                try { audioPlayer.load(); } catch(e) {}
                 
                 const dlLink = document.getElementById('resDownloadLink');
                 dlLink.href = data.download_url;
@@ -1077,11 +1096,17 @@ HTML_MOBILE_UI = """
 
                 statusBadge.innerText = `✅ ¡Canción lista para escuchar y descargar en ${selectedFormat.toUpperCase()}!`;
                 resultBox.style.display = 'block';
-                loadHistory();
+                resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+                try { await loadHistory(); } catch(e) {}
 
             } catch (err) {
-                alert('Error: ' + err.message);
-                statusBadge.innerText = '❌ ' + err.message;
+                console.error(err);
+                const isAbort = err.name === 'AbortError';
+                const msg = isAbort ? 'El servidor tardó en responder. Comprueba si el archivo ya está en la lista de abajo.' : err.message;
+                alert('Aviso: ' + msg);
+                statusBadge.innerText = '⚠️ ' + msg;
+                try { await loadHistory(); } catch(e) {}
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = '<span>🎧 CARGAR, ESCUCHAR Y DESCARGAR</span>';
@@ -1105,14 +1130,19 @@ HTML_MOBILE_UI = """
             btn.innerHTML = '<div class="spinner"></div> Separando Pista y Voz con DSP...';
 
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 90000);
+
                 const response = await fetch('/api/separate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         filename: currentFilename,
                         format: selectedFormat
-                    })
+                    }),
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
 
                 const data = await response.json();
 
@@ -1121,17 +1151,21 @@ HTML_MOBILE_UI = """
                 }
 
                 instAudio.src = data.instrumental_url;
+                try { instAudio.load(); } catch(e) {}
                 instDlLink.href = data.instrumental_url;
                 instDlLink.setAttribute('download', data.instrumental_filename);
 
                 vocalAudio.src = data.vocals_url;
+                try { vocalAudio.load(); } catch(e) {}
                 vocalDlLink.href = data.vocals_url;
                 vocalDlLink.setAttribute('download', data.vocals_filename);
 
                 stemResultBox.style.display = 'block';
-                loadHistory();
+                stemResultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                try { await loadHistory(); } catch(e) {}
 
             } catch (err) {
+                console.error(err);
                 alert('Error al separar: ' + err.message);
             } finally {
                 btn.disabled = false;
@@ -1171,12 +1205,14 @@ HTML_MOBILE_UI = """
                 }
 
                 sampleAudio.src = data.sample_url;
+                try { sampleAudio.load(); } catch(e) {}
                 sampleDlLink.href = data.sample_url;
                 sampleDlLink.setAttribute('download', data.filename);
                 sampleLabel.innerText = `🎧 Muestra lista (${Math.round(data.sample_duration)}s):`;
 
                 sampleResultBox.style.display = 'block';
-                loadHistory();
+                sampleResultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                try { await loadHistory(); } catch(e) {}
 
             } catch (err) {
                 alert('Error al generar muestra: ' + err.message);
