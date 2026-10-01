@@ -8,10 +8,12 @@ import os
 import sys
 import socket
 import urllib.parse
+import time
+import asyncio
 from typing import Optional, Dict, Any, List
 import qrcode
 import uvicorn
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -30,6 +32,77 @@ app = FastAPI(title="Suno AI Mobile & Web Downloader HQ")
 scraper = SunoScraper()
 DOWNLOADS_DIR = os.path.abspath("downloads")
 os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+
+
+def cleanup_old_files(max_age_seconds: int = 300, max_folder_mb: int = 150):
+    """
+    Elimina archivos de DOWNLOADS_DIR:
+    1. Que tengan una antigüedad mayor a max_age_seconds (por defecto 5 minutos / 300s).
+    2. Si el peso total de la carpeta supera max_folder_mb (150 MB), purga los más antiguos
+       hasta dejarla en un tamaño seguro (< 80 MB) para no saturar los 512 MB de Render.
+    """
+    try:
+        if not os.path.exists(DOWNLOADS_DIR):
+            return
+        now = time.time()
+        file_list = []
+        total_size = 0
+        for f in os.listdir(DOWNLOADS_DIR):
+            full_path = os.path.join(DOWNLOADS_DIR, f)
+            if os.path.isfile(full_path):
+                try:
+                    stat = os.stat(full_path)
+                    age = now - stat.st_mtime
+                    size = stat.st_size
+                    if age > max_age_seconds:
+                        try:
+                            os.remove(full_path)
+                            continue
+                        except Exception:
+                            pass
+                    file_list.append((stat.st_mtime, size, full_path))
+                    total_size += size
+                except Exception:
+                    pass
+
+        max_bytes = max_folder_mb * 1024 * 1024
+        target_bytes = 80 * 1024 * 1024
+        if total_size > max_bytes:
+            file_list.sort(key=lambda x: x[0])
+            for _, size, path in file_list:
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                        total_size -= size
+                        if total_size <= target_bytes:
+                            break
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+async def delayed_remove_file(file_path: str, delay_sec: int = 300):
+    """Espera delay_sec segundos (por defecto 5 min) y elimina el archivo para liberar espacio en Render."""
+    await asyncio.sleep(delay_sec)
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception:
+        pass
+
+
+@app.on_event("startup")
+async def start_periodic_cleanup():
+    """Limpia archivos viejos al iniciar y ejecuta la limpieza cada 60 segundos en segundo plano."""
+    cleanup_old_files(max_age_seconds=300)
+
+    async def loop():
+        while True:
+            await asyncio.sleep(60)
+            cleanup_old_files(max_age_seconds=300)
+
+    asyncio.create_task(loop())
 
 
 def get_local_ip() -> str:
@@ -814,6 +887,17 @@ HTML_MOBILE_UI = """
             font-weight: 600;
             white-space: nowrap;
         }
+
+        .server-status-pill {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #a1a1aa;
+            font-size: 11px;
+            padding: 5px 12px;
+            border-radius: 12px;
+            margin-top: 8px;
+        }
     </style>
 </head>
 <body>
@@ -822,6 +906,9 @@ HTML_MOBILE_UI = """
             <div class="logo-badge">⚡ Suno Downloader HQ</div>
             <h1>Descargar & Separar Pistas</h1>
             <p class="subtitle">Visualiza, escucha en línea y descarga en MP3/WAV o separa voz e instrumental</p>
+            <div class="server-status-pill">
+                🛡️ Modo Servidor Efímero: Las descargas y muestras se eliminan automáticamente tras 5 minutos para ahorrar espacio.
+            </div>
         </header>
 
         <div class="card">
@@ -1287,7 +1374,7 @@ async def index():
 
 
 @app.post("/api/download")
-async def api_download(req: DownloadRequest):
+async def api_download(req: DownloadRequest, background_tasks: BackgroundTasks):
     try:
         url = req.url.strip()
         if not url:
@@ -1317,6 +1404,14 @@ async def api_download(req: DownloadRequest):
         elif info.get("image_url"):
             cover_url = info["image_url"]
 
+        # Programar auto-eliminación en 5 minutos (300s) para no ocupar disco en el servidor
+        if res.get("audio_path"):
+            background_tasks.add_task(delayed_remove_file, res["audio_path"], 300)
+        if res.get("cover_path"):
+            background_tasks.add_task(delayed_remove_file, res["cover_path"], 300)
+        if res.get("metadata_path"):
+            background_tasks.add_task(delayed_remove_file, res["metadata_path"], 300)
+
         return {
             "success": True,
             "title": info["title"],
@@ -1335,7 +1430,7 @@ async def api_download(req: DownloadRequest):
 
 
 @app.post("/api/separate")
-async def api_separate_stems(req: SeparateRequest):
+async def api_separate_stems(req: SeparateRequest, background_tasks: BackgroundTasks):
     """Separa la canción en Pista Instrumental y Solo Voz."""
     try:
         filename = req.filename.strip()
@@ -1357,6 +1452,12 @@ async def api_separate_stems(req: SeparateRequest):
         inst_file = sep_res["instrumental_filename"]
         vocal_file = sep_res["vocals_filename"]
 
+        # Programar auto-eliminación en 5 minutos (300s)
+        if sep_res.get("instrumental_path"):
+            background_tasks.add_task(delayed_remove_file, sep_res["instrumental_path"], 300)
+        if sep_res.get("vocals_path"):
+            background_tasks.add_task(delayed_remove_file, sep_res["vocals_path"], 300)
+
         return {
             "success": True,
             "instrumental_filename": inst_file,
@@ -1371,7 +1472,7 @@ async def api_separate_stems(req: SeparateRequest):
 
 
 @app.post("/api/sample")
-async def api_generate_sample(req: SampleRequest):
+async def api_generate_sample(req: SampleRequest, background_tasks: BackgroundTasks):
     """Genera una muestra/preview de una canción existente."""
     try:
         filename = req.filename.strip()
@@ -1405,6 +1506,10 @@ async def api_generate_sample(req: SampleRequest):
         )
 
         sample_filename = sample_res["filename"]
+        # Programar auto-eliminación en 5 minutos (300s)
+        if sample_res.get("sample_path"):
+            background_tasks.add_task(delayed_remove_file, sample_res["sample_path"], 300)
+
         return {
             "success": True,
             "filename": sample_filename,
@@ -1417,7 +1522,7 @@ async def api_generate_sample(req: SampleRequest):
 
 
 @app.get("/downloads/{filename}")
-async def download_file_endpoint(filename: str):
+async def download_file_endpoint(filename: str, background_tasks: BackgroundTasks):
     file_path = os.path.join(DOWNLOADS_DIR, filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
@@ -1435,6 +1540,10 @@ async def download_file_endpoint(filename: str):
         media_type = "image/png"
     elif filename.endswith(".txt"):
         media_type = "text/plain; charset=utf-8"
+
+    # Al ser descargado o reproducido, programar borrado en 2 minutos (120s)
+    # para que termine de transmitirse y luego se libere el espacio en el servidor
+    background_tasks.add_task(delayed_remove_file, file_path, 120)
 
     return FileResponse(
         file_path,

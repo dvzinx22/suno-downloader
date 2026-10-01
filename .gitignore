@@ -7,3 +7,10 @@ downloads/
 *.log
 .env
 .DS_Store
+
+# Archivos de análisis de datos y proyectos locales independientes
+PO.py
+practica.py
+titanic.csv
+typescript/
+
